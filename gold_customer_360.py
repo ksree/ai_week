@@ -671,7 +671,7 @@ spark.sql("USE SCHEMA test")
 # MAGIC %sql
 # MAGIC -- Optimize with Z-ORDER on key query columns
 # MAGIC OPTIMIZE gold_customer_360_daily
-# MAGIC ZORDER BY (customer_key, is_identified_customer, customer_value_segment, lifecycle_stage, behavior_date);
+# MAGIC ZORDER BY (customer_key, is_identified_customer, behavior_date);
 
 # COMMAND ----------
 
@@ -935,36 +935,41 @@ print("=" * 80)
 segment_summary = {row['customer_value_segment']: row['count'] for row in segment_breakdown}
 dbutils.notebook.exit(f"Success: Processed {summary_stats['unique_customers']:,} customers. Segments: {segment_summary}")
 
----
 
-## Summary of Gold Customer 360 Notebook
 
-This comprehensive notebook creates a **daily customer 360 view** with:
+# COMMAND ----------
 
-### **Key Features:**
-
-1. **Profile & Identity**: Customer identification, tenure, demographics
-2. **Daily Activity**: Sessions, events, engagement metrics
-3. **Behavioral Patterns**: 
-   - Browsing (views, clicks, CTR)
-   - Purchase (conversions, transactions, revenue)
-   - Content consumption (campaigns, advertisers, verticals)
-4. **Cross-Device Behavior**: Device diversity, switching patterns
-5. **Temporal Patterns**: Time-of-day, day-of-week preferences
-6. **Engagement Metrics**: Scores, trends, intensity
-7. **Loyalty Indicators**: Recency, frequency, churn risk
-8. **Segmentation**: Value, engagement, propensity, lifecycle
-
-### **Business Value:**
-
-- **Personalization**: Target customers based on behavior and preferences
-- **Retention**: Identify at-risk customers for proactive campaigns
-- **Revenue Optimization**: Focus on high-value segments
-- **Campaign Timing**: Send offers when customers are most active
-- **Product Development**: Understand content preferences
-
-### **Companion Table:**
-
-- `gold_customer_segments`: Current-state snapshot for operational use
-
-All three notebooks (Events, Sessions, Customer 360) are now complete and production-ready!
+# MAGIC %md
+# MAGIC ---
+# MAGIC
+# MAGIC ## Summary of Gold Customer 360 Notebook
+# MAGIC
+# MAGIC This comprehensive notebook creates a **daily customer 360 view** with:
+# MAGIC
+# MAGIC ### **Key Features:**
+# MAGIC
+# MAGIC 1. **Profile & Identity**: Customer identification, tenure, demographics
+# MAGIC 2. **Daily Activity**: Sessions, events, engagement metrics
+# MAGIC 3. **Behavioral Patterns**: 
+# MAGIC    - Browsing (views, clicks, CTR)
+# MAGIC    - Purchase (conversions, transactions, revenue)
+# MAGIC    - Content consumption (campaigns, advertisers, verticals)
+# MAGIC 4. **Cross-Device Behavior**: Device diversity, switching patterns
+# MAGIC 5. **Temporal Patterns**: Time-of-day, day-of-week preferences
+# MAGIC 6. **Engagement Metrics**: Scores, trends, intensity
+# MAGIC 7. **Loyalty Indicators**: Recency, frequency, churn risk
+# MAGIC 8. **Segmentation**: Value, engagement, propensity, lifecycle
+# MAGIC
+# MAGIC ### **Business Value:**
+# MAGIC
+# MAGIC - **Personalization**: Target customers based on behavior and preferences
+# MAGIC - **Retention**: Identify at-risk customers for proactive campaigns
+# MAGIC - **Revenue Optimization**: Focus on high-value segments
+# MAGIC - **Campaign Timing**: Send offers when customers are most active
+# MAGIC - **Product Development**: Understand content preferences
+# MAGIC
+# MAGIC ### **Companion Table:**
+# MAGIC
+# MAGIC - `gold_customer_segments`: Current-state snapshot for operational use
+# MAGIC
+# MAGIC All three notebooks (Events, Sessions, Customer 360) are now complete and production-ready!
