@@ -197,7 +197,7 @@ spark.sql("USE SCHEMA test")
 # MAGIC     ROUND(SUM(CASE WHEN LOWER(primary_device_type) IN ('smartphone', 'mobile') THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as mobile_session_pct,
 # MAGIC     ROUND(SUM(CASE WHEN LOWER(primary_device_type) IN ('desktop', 'pc') THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as desktop_session_pct,
 # MAGIC     ROUND(SUM(CASE WHEN LOWER(primary_device_type) = 'tablet' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as tablet_session_pct,
-# MAGIC     MAX(CASE WHEN unique_device_types_used > 1 THEN TRUE ELSE FALSE END) as cross_device_user_flag,
+# MAGIC     CASE WHEN COUNT(DISTINCT primary_device_type) > 1 THEN TRUE ELSE FALSE END as cross_device_user_flag,
 # MAGIC     
 # MAGIC     -- Temporal patterns
 # MAGIC     SUM(CASE WHEN is_business_hours THEN 1 ELSE 0 END) as business_hours_sessions,
