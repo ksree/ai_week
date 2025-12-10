@@ -1,14 +1,14 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Silver Layer: Customer Events Enriched
-# MAGIC 
+# MAGIC
 # MAGIC **Purpose:** Flatten and enrich customer events from offer_silver_clean with:
 # MAGIC - User identity resolution
 # MAGIC - Event classification
 # MAGIC - Struct flattening
 # MAGIC - Temporal enrichment
 # MAGIC - Data quality scoring
-# MAGIC 
+# MAGIC
 # MAGIC **Source:** offer_silver_clean
 # MAGIC **Target:** silver_customer_events_enriched
 # MAGIC **Schedule:** Every 30 minutes (aligned with source ingestion)
@@ -28,9 +28,16 @@ import hashlib
 
 # Configuration
 SOURCE_TABLE = "centraldata_prod.minion_event.offer_silver_clean"
-TARGET_TABLE = "centraldata_sandbox.minion.silver_customer_events_enriched"
-CHECKPOINT_TABLE = "silver_customer_events_watermark"
+TARGET_TABLE = "centraldata_sandbox.test.silver_customer_events_enriched"
+CHECKPOINT_TABLE = "centraldata_sandbox.test.silver_customer_events_watermark"
 
+
+
+
+# COMMAND ----------
+
+spark.sql("USE CATALOG centraldata_sandbox")
+spark.sql("USE SCHEMA test")
 
 # COMMAND ----------
 
@@ -96,7 +103,7 @@ if watermark_df.count() > 0:
     last_watermark = watermark_df.collect()[0]['last_processed_timestamp']
 else:
     # First run - process last 7 days
-    last_watermark = datetime.now() - timedelta(days=7)
+    last_watermark = datetime.now() - timedelta(days=1)
 
 print(f"Processing events since: {last_watermark}")
 
@@ -110,10 +117,10 @@ print(f"Processing events since: {last_watermark}")
 source_df = spark.sql(f"""
     SELECT *
     FROM {SOURCE_TABLE}
-    WHERE createDate >= '{last_watermark}'
+    WHERE timestamp >= '{last_watermark}'
         AND _corrupt_record IS NULL
-        AND offerTraceId IS NOT NULL
-    ORDER BY createDate
+        AND sessionId IS NOT NULL
+    ORDER BY timestamp
 """)
 
 print(f"Source records to process: {source_df.count()}")
@@ -131,7 +138,7 @@ events_with_identity = source_df.withColumn(
     F.coalesce(
         F.col("profile.id"),
         F.col("fluentId"),
-        F.col("emailSha256"),
+        F.col("profile.emailSha256"),
         F.concat(F.lit("ANON_"), F.col("sessionId"))  # Fallback for anonymous
     )
 ).withColumn(
@@ -142,13 +149,10 @@ events_with_identity = source_df.withColumn(
     F.col("profile.id")
 ).withColumn(
     "email_sha256",
-    F.col("emailSha256")
+    F.col("profile.emailSha256")
 ).withColumn(
     "email_md5",
-    F.col("emailMd5")
-).withColumn(
-    "device_advertising_id",
-    F.col("device.advertisingId")
+    F.col("profile.emailMd5")
 ).withColumn(
     "is_identified_user",
     F.when(F.col("profile.id").isNotNull(), True).otherwise(False)
@@ -156,6 +160,10 @@ events_with_identity = source_df.withColumn(
     "is_anonymous_user",
     F.when(F.col("profile.id").isNull(), True).otherwise(False)
 )
+
+# COMMAND ----------
+
+display(events_with_identity.limit(10))
 
 # COMMAND ----------
 
@@ -183,6 +191,10 @@ events_classified = events_with_identity.withColumn(
     "is_transaction_event",
     F.when(F.col("campaignData.orderId").isNotNull(), True).otherwise(False)
 )
+
+# COMMAND ----------
+
+display(events_classified.limit(10))
 
 # COMMAND ----------
 
@@ -427,7 +439,7 @@ events_temporal_enriched = events_traffic_flattened.withColumn(
 ).withColumn(
     "local_hour_of_day",
     F.when(F.col("device.localTimeOffset").isNotNull(),
-           F.hour(F.col("event_timestamp") + F.expr("INTERVAL " + F.col("device.localTimeOffset") + " HOURS")))
+           F.hour(F.col("event_timestamp") + F.expr("make_interval(0, 0, 0, 0, cast(device.localTimeOffset as int), 0, 0)")))
      .otherwise(F.col("event_hour_est"))
 ).withColumn(
     "day_of_week",
@@ -564,6 +576,11 @@ events_final = events_deduped.withColumn(
     "hour_est",  # Partition column
     F.col("event_hour_est")
 )
+
+# COMMAND ----------
+
+# Display the columns in the DataFrame to verify available fields
+print(events_final.columns)
 
 # COMMAND ----------
 
