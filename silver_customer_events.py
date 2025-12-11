@@ -626,7 +626,6 @@ def hash_phone(phone):
 
 # COMMAND ----------
 
-display(spark.table("silver_customer_events_transformed").limit(10))
 
 # COMMAND ----------
 
