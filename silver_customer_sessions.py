@@ -25,6 +25,34 @@ SOURCE_TABLE = "centraldata_sandbox.test.silver_customer_events_enriched"
 TARGET_TABLE = "centraldata_sandbox.test.silver_customer_sessions_enriched"
 CHECKPOINT_TABLE = "centraldata_sandbox.test.silver_customer_sessions_watermark"
 
+# =============================================================================
+# RUN MODE CONFIGURATION
+# =============================================================================
+# Set RUN_MODE to control how the notebook processes data:
+#   - "INCREMENTAL": Process only new data since last watermark (default for hourly runs)
+#   - "FULL_REFRESH": Overwrite entire table (use for historical loads/backfills)
+#
+# For FULL_REFRESH mode, set START_DATE and END_DATE to define the date range.
+# For INCREMENTAL mode, these are ignored and watermark is used instead.
+# =============================================================================
+
+# Create widgets for parameterized runs
+dbutils.widgets.dropdown("run_mode", "INCREMENTAL", ["INCREMENTAL", "FULL_REFRESH"])
+dbutils.widgets.text("start_date", "")  # Format: YYYY-MM-DD
+dbutils.widgets.text("end_date", "")    # Format: YYYY-MM-DD
+
+# Get parameters
+RUN_MODE = dbutils.widgets.get("run_mode").upper()
+START_DATE = dbutils.widgets.get("start_date") or None
+END_DATE = dbutils.widgets.get("end_date") or None
+
+print(f"=" * 60)
+print(f"RUN MODE: {RUN_MODE}")
+if RUN_MODE == "FULL_REFRESH":
+    print(f"START_DATE: {START_DATE or 'Not specified (will use default)'}")
+    print(f"END_DATE: {END_DATE or 'Not specified (will use current)'}")
+print(f"=" * 60)
+
 # COMMAND ----------
 
 spark.sql("USE CATALOG centraldata_sandbox")
@@ -69,18 +97,46 @@ spark.sql("USE SCHEMA test")
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Get last processed timestamp for sessions
-# MAGIC CREATE OR REPLACE TEMP VIEW last_watermark_sessions AS
-# MAGIC SELECT 
-# MAGIC   CURRENT_TIMESTAMP - INTERVAL 2 DAYS as watermark_ts
-# MAGIC FROM silver_customer_sessions_watermark
-# MAGIC WHERE table_name = 'silver_customer_sessions_enriched';
+# Determine date range based on RUN_MODE
+if RUN_MODE == "FULL_REFRESH":
+    # Full refresh mode - use provided date range or defaults
+    if START_DATE:
+        start_ts = f"CAST('{START_DATE}' AS DATE)"
+    else:
+        # Default: process last 365 days for full refresh
+        start_ts = "CURRENT_DATE - INTERVAL 365 DAYS"
+
+    if END_DATE:
+        end_ts = f"CAST('{END_DATE}' AS DATE)"
+    else:
+        end_ts = "CURRENT_DATE"
+
+    # Create watermark view for FULL_REFRESH with date range
+    spark.sql(f"""
+        CREATE OR REPLACE TEMP VIEW last_watermark_sessions AS
+        SELECT
+            {start_ts} as watermark_ts,
+            {end_ts} as end_watermark_ts
+    """)
+    print(f"FULL REFRESH MODE: Processing sessions from {START_DATE or 'last 365 days'} to {END_DATE or 'now'}")
+
+else:
+    # Incremental mode - use watermark table
+    spark.sql("""
+        CREATE OR REPLACE TEMP VIEW last_watermark_sessions AS
+        SELECT
+            COALESCE(CAST(last_processed_date AS DATE), CURRENT_DATE - INTERVAL 2 DAYS) as watermark_ts,
+            CAST(NULL AS DATE) as end_watermark_ts
+        FROM silver_customer_sessions_watermark
+        WHERE table_name = 'silver_customer_sessions_enriched'
+    """)
+    print("INCREMENTAL MODE: Using watermark table for processing window")
 
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC select * from last_watermark_sessions
+# MAGIC -- Preview watermark values
+# MAGIC SELECT * FROM last_watermark_sessions
 
 # COMMAND ----------
 
@@ -95,12 +151,16 @@ spark.sql("USE SCHEMA test")
 # MAGIC
 # MAGIC WITH sessions_filtered AS (
 # MAGIC   -- Get events for sessions we need to process/update
-# MAGIC   -- Convert UTC timestamp to EST for all temporal calculations
-# MAGIC   SELECT 
+# MAGIC   -- Filter based on run mode (incremental or full refresh with date range)
+# MAGIC   SELECT
 # MAGIC     *,
 # MAGIC     from_utc_timestamp(event_timestamp, 'America/New_York') as event_timestamp_est
 # MAGIC   FROM silver_customer_events_enriched
-# MAGIC   WHERE date_est >= (SELECT CAST(watermark_ts AS DATE) FROM last_watermark_sessions)
+# MAGIC   WHERE date_est >= (SELECT watermark_ts FROM last_watermark_sessions)
+# MAGIC     AND (
+# MAGIC       (SELECT end_watermark_ts FROM last_watermark_sessions) IS NULL  -- Incremental: no end date
+# MAGIC       OR date_est <= (SELECT end_watermark_ts FROM last_watermark_sessions)  -- Full refresh: apply end date
+# MAGIC     )
 # MAGIC ),
 # MAGIC
 # MAGIC session_aggregated AS (
@@ -363,13 +423,50 @@ spark.sql("USE SCHEMA test")
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Perform incremental MERGE
-# MAGIC MERGE INTO silver_customer_sessions_enriched target
-# MAGIC USING silver_customer_sessions_transformed source
-# MAGIC ON target.session_pk = source.session_pk
-# MAGIC WHEN MATCHED THEN UPDATE SET *
-# MAGIC WHEN NOT MATCHED THEN INSERT *;
+# Write data based on RUN_MODE
+if RUN_MODE == "FULL_REFRESH":
+    # ==========================================================================
+    # FULL REFRESH MODE: Overwrite table or specific date partitions
+    # ==========================================================================
+    print(f"FULL REFRESH: Overwriting table {TARGET_TABLE}")
+
+    df_to_write = spark.table("silver_customer_sessions_transformed")
+
+    if START_DATE:
+        # Overwrite only specific partitions based on date range
+        df_to_write.write \
+            .format("delta") \
+            .mode("overwrite") \
+            .option("replaceWhere", f"date_est >= '{START_DATE}'") \
+            .option("overwriteSchema", "true") \
+            .saveAsTable(TARGET_TABLE)
+        print(f"Partitions replaced for dates >= {START_DATE}")
+    else:
+        # Full table overwrite
+        df_to_write.write \
+            .format("delta") \
+            .mode("overwrite") \
+            .option("overwriteSchema", "true") \
+            .saveAsTable(TARGET_TABLE)
+        print("Full table overwritten")
+
+    record_count = df_to_write.count()
+    print(f"FULL REFRESH completed with {record_count:,} sessions")
+
+else:
+    # ==========================================================================
+    # INCREMENTAL MODE: MERGE new/updated records
+    # ==========================================================================
+    print(f"INCREMENTAL: Performing MERGE into {TARGET_TABLE}")
+
+    spark.sql("""
+        MERGE INTO silver_customer_sessions_enriched target
+        USING silver_customer_sessions_transformed source
+        ON target.session_pk = source.session_pk
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
+    print("INCREMENTAL MERGE completed successfully")
 
 # COMMAND ----------
 
@@ -396,21 +493,26 @@ spark.sql("USE SCHEMA test")
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Update watermark with max processed timestamp
-# MAGIC MERGE INTO silver_customer_sessions_watermark target
-# MAGIC USING (
-# MAGIC   SELECT 
-# MAGIC     'silver_customer_sessions_enriched' as table_name,
-# MAGIC     MAX(session_start_timestamp) as last_processed_timestamp,
-# MAGIC     MAX(session_date_est) as last_processed_date,
-# MAGIC     CURRENT_TIMESTAMP() as updated_at
-# MAGIC   FROM silver_customer_sessions_enriched
-# MAGIC   WHERE date_est >= CURRENT_DATE - 7
-# MAGIC ) source
-# MAGIC ON target.table_name = source.table_name
-# MAGIC WHEN MATCHED THEN UPDATE SET *
-# MAGIC WHEN NOT MATCHED THEN INSERT *;
+# Update watermark (only for INCREMENTAL mode)
+if RUN_MODE == "INCREMENTAL":
+    spark.sql("""
+        MERGE INTO silver_customer_sessions_watermark target
+        USING (
+            SELECT
+                'silver_customer_sessions_enriched' as table_name,
+                MAX(session_start_timestamp) as last_processed_timestamp,
+                MAX(session_date_est) as last_processed_date,
+                CURRENT_TIMESTAMP() as updated_at
+            FROM silver_customer_sessions_enriched
+            WHERE date_est >= CURRENT_DATE - 7
+        ) source
+        ON target.table_name = source.table_name
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
+    print("Watermark updated successfully")
+else:
+    print("FULL REFRESH mode: Watermark NOT updated (preserving for future incremental runs)")
 
 # COMMAND ----------
 
@@ -564,6 +666,9 @@ summary_stats = spark.sql("""
 print("=" * 80)
 print("SILVER LAYER - CUSTOMER SESSIONS ENRICHED - JOB COMPLETED")
 print("=" * 80)
+print(f"Run Mode: {RUN_MODE}")
+if RUN_MODE == "FULL_REFRESH":
+    print(f"Date Range: {START_DATE or 'default'} to {END_DATE or 'now'}")
 print(f"Total Sessions Processed: {summary_stats['total_sessions']:,}")
 print(f"Unique Customers: {summary_stats['unique_customers']:,}")
 print(f"Avg Session Duration: {summary_stats['avg_duration_sec']:.2f} seconds")
@@ -576,6 +681,6 @@ print(f"Processing Completed: {datetime.now()}")
 print("=" * 80)
 
 # Return success
-dbutils.notebook.exit(f"Success: Processed {summary_stats['total_sessions']:,} sessions for {summary_stats['unique_customers']:,} customers")
+dbutils.notebook.exit(f"Success: {RUN_MODE} - Processed {summary_stats['total_sessions']:,} sessions for {summary_stats['unique_customers']:,} customers")
 
 
