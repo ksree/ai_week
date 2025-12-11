@@ -101,14 +101,19 @@ spark.sql("USE SCHEMA test")
 # Determine date range based on RUN_MODE
 if RUN_MODE == "FULL_REFRESH":
     # Full refresh mode - use provided date range or defaults
+    # Note: We subtract 1 day from START_DATE when filtering source data (createDate is UTC)
+    # to account for timezone conversion (UTC -> EST can shift dates by up to 5 hours)
+    # The actual date_est filtering happens at write time to ensure correct partitions
     if START_DATE:
-        start_ts = f"CAST('{START_DATE} 00:00:00' AS TIMESTAMP)"
+        # Subtract 1 day to capture UTC events that become EST dates on START_DATE
+        start_ts = f"CAST('{START_DATE} 00:00:00' AS TIMESTAMP) - INTERVAL 1 DAY"
     else:
         # Default: process last 365 days for full refresh
         start_ts = "CURRENT_TIMESTAMP - INTERVAL 365 DAYS"
 
     if END_DATE:
-        end_ts = f"CAST('{END_DATE} 23:59:59' AS TIMESTAMP)"
+        # Add 1 day to capture UTC events that become EST dates on END_DATE
+        end_ts = f"CAST('{END_DATE} 23:59:59' AS TIMESTAMP) + INTERVAL 1 DAY"
     else:
         end_ts = "CURRENT_TIMESTAMP"
 
@@ -120,6 +125,7 @@ if RUN_MODE == "FULL_REFRESH":
             {end_ts} as end_watermark_ts
     """)
     print(f"FULL REFRESH MODE: Processing data from {START_DATE or 'last 365 days'} to {END_DATE or 'now'}")
+    print(f"  (Source filter expanded by ±1 day to handle UTC->EST timezone conversion)")
 
 else:
     # Incremental mode - use watermark table
@@ -798,15 +804,32 @@ if RUN_MODE == "FULL_REFRESH":
 
     if START_DATE:
         # Overwrite only specific partitions based on date range
+        # Filter data by date_est (EST timezone) to match the replaceWhere condition
+        # This ensures only rows within the specified date range are written
+        from pyspark.sql.functions import col, lit
+
+        # Apply START_DATE filter (required)
+        df_filtered = df_to_write.filter(col("date_est") >= lit(START_DATE).cast("date"))
+
+        # Apply END_DATE filter if specified
+        if END_DATE:
+            df_filtered = df_filtered.filter(col("date_est") <= lit(END_DATE).cast("date"))
+            replace_condition = f"date_est >= CAST('{START_DATE}' AS DATE) AND date_est <= CAST('{END_DATE}' AS DATE)"
+            print(f"Filtering data for date range: {START_DATE} to {END_DATE}")
+        else:
+            replace_condition = f"date_est >= CAST('{START_DATE}' AS DATE)"
+            print(f"Filtering data for dates >= {START_DATE}")
+
         # Note: replaceWhere doesn't support overwriteSchema, so schema must match
         # Use mergeSchema to handle minor schema differences
-        df_to_write.write \
+        df_filtered.write \
             .format("delta") \
             .mode("overwrite") \
-            .option("replaceWhere", f"date_est >= '{START_DATE}'") \
+            .option("replaceWhere", replace_condition) \
             .option("mergeSchema", "true") \
             .saveAsTable(TARGET_TABLE)
-        print(f"Partitions replaced for dates >= {START_DATE}")
+        print(f"Partitions replaced for: {replace_condition}")
+        record_count = df_filtered.count()
     else:
         # Full table overwrite - drop and recreate to force schema alignment
         print("Dropping existing table for full schema refresh...")
@@ -817,8 +840,8 @@ if RUN_MODE == "FULL_REFRESH":
             .partitionBy("date_est", "hour_est") \
             .saveAsTable(TARGET_TABLE)
         print("Full table overwritten with new schema")
+        record_count = df_to_write.count()
 
-    record_count = df_to_write.count()
     print(f"FULL REFRESH completed with {record_count:,} records")
 
 else:
