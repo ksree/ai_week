@@ -31,6 +31,44 @@ SOURCE_TABLE = "centraldata_prod.minion_event.offer_silver_clean"
 TARGET_TABLE = "centraldata_sandbox.test.silver_customer_events_enriched"
 CHECKPOINT_TABLE = "centraldata_sandbox.test.silver_customer_events_watermark"
 
+# =============================================================================
+# RUN MODE CONFIGURATION
+# =============================================================================
+# Set RUN_MODE to control how the notebook processes data:
+#   - "INCREMENTAL": Process only new data since last watermark (default for hourly runs)
+#   - "FULL_REFRESH": Overwrite entire table (use for historical loads/backfills)
+#
+# For FULL_REFRESH mode, set START_DATE and END_DATE to define the date range.
+# For INCREMENTAL mode, these are ignored and watermark is used instead.
+# =============================================================================
+
+# Uncomment and set via Databricks widgets or job parameters:
+# dbutils.widgets.dropdown("run_mode", "INCREMENTAL", ["INCREMENTAL", "FULL_REFRESH"])
+# dbutils.widgets.text("start_date", "")
+# dbutils.widgets.text("end_date", "")
+
+# Get parameters (with defaults)
+try:
+    RUN_MODE = dbutils.widgets.get("run_mode").upper()
+except:
+    RUN_MODE = "INCREMENTAL"  # Default to incremental
+
+try:
+    START_DATE = dbutils.widgets.get("start_date")
+    START_DATE = START_DATE if START_DATE else None
+except:
+    START_DATE = None
+
+try:
+    END_DATE = dbutils.widgets.get("end_date")
+    END_DATE = END_DATE if END_DATE else None
+except:
+    END_DATE = None
+
+print(f"Run Mode: {RUN_MODE}")
+print(f"Start Date: {START_DATE}")
+print(f"End Date: {END_DATE}")
+
 
 
 
@@ -92,20 +130,37 @@ def calculate_data_quality_score(row_dict):
 
 # COMMAND ----------
 
-# Get last processed timestamp
-watermark_df = spark.sql(f"""
-    SELECT last_processed_timestamp 
-    FROM {CHECKPOINT_TABLE} 
-    WHERE table_name = '{TARGET_TABLE}'
-""")
+# Determine date range based on RUN_MODE
+if RUN_MODE == "FULL_REFRESH":
+    # Full refresh mode - use provided date range or defaults
+    if START_DATE:
+        last_watermark = datetime.strptime(START_DATE, "%Y-%m-%d")
+    else:
+        # Default: process last 365 days for full refresh
+        last_watermark = datetime.now() - timedelta(days=365)
 
-if watermark_df.count() > 0:
-    last_watermark = watermark_df.collect()[0]['last_processed_timestamp']
+    if END_DATE:
+        end_watermark = datetime.strptime(END_DATE, "%Y-%m-%d") + timedelta(days=1)  # Include end date
+    else:
+        end_watermark = datetime.now() + timedelta(days=1)
+
+    print(f"FULL REFRESH MODE: Processing data from {last_watermark} to {end_watermark}")
 else:
-    # First run - process last 7 days
-    last_watermark = datetime.now() - timedelta(days=1)
+    # Incremental mode - use watermark table
+    watermark_df = spark.sql(f"""
+        SELECT last_processed_timestamp
+        FROM {CHECKPOINT_TABLE}
+        WHERE table_name = '{TARGET_TABLE}'
+    """)
 
-print(f"Processing events since: {last_watermark}")
+    if watermark_df.count() > 0:
+        last_watermark = watermark_df.collect()[0]['last_processed_timestamp']
+    else:
+        # First run - process last 1 day
+        last_watermark = datetime.now() - timedelta(days=1)
+
+    end_watermark = None  # No end limit for incremental
+    print(f"INCREMENTAL MODE: Processing events since {last_watermark}")
 
 # COMMAND ----------
 
@@ -114,14 +169,26 @@ print(f"Processing events since: {last_watermark}")
 
 # COMMAND ----------
 
-source_df = spark.sql(f"""
-    SELECT *
-    FROM {SOURCE_TABLE}
-    WHERE timestamp >= '{last_watermark}'
-        AND _corrupt_record IS NULL
-        AND sessionId IS NOT NULL
-    ORDER BY timestamp
-""")
+# Build source query based on run mode
+if RUN_MODE == "FULL_REFRESH" and end_watermark:
+    source_df = spark.sql(f"""
+        SELECT *
+        FROM {SOURCE_TABLE}
+        WHERE timestamp >= '{last_watermark}'
+            AND timestamp < '{end_watermark}'
+            AND _corrupt_record IS NULL
+            AND sessionId IS NOT NULL
+        ORDER BY timestamp
+    """)
+else:
+    source_df = spark.sql(f"""
+        SELECT *
+        FROM {SOURCE_TABLE}
+        WHERE timestamp >= '{last_watermark}'
+            AND _corrupt_record IS NULL
+            AND sessionId IS NOT NULL
+        ORDER BY timestamp
+    """)
 
 print(f"Source records to process: {source_df.count()}")
 
@@ -731,45 +798,76 @@ silver_events_schema = events_filtered.select(
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 19. Write to Silver Table with MERGE
+# MAGIC ## 19. Write to Silver Table (FULL_REFRESH or INCREMENTAL)
 
 # COMMAND ----------
 
 # Check if target table exists
 target_exists = spark.catalog.tableExists(TARGET_TABLE)
 
-if not target_exists:
-    # First time - create table
-    print(f"Creating new table: {TARGET_TABLE}")
-    
-    silver_events_schema.write \
-        .format("delta") \
-        .mode("overwrite") \
-        .partitionBy("date_est", "hour_est") \
-        .option("overwriteSchema", "true") \
-        .saveAsTable(TARGET_TABLE)
-    
-    print(f"Table created successfully with {silver_events_schema.count()} records")
+if RUN_MODE == "FULL_REFRESH":
+    # ==========================================================================
+    # FULL REFRESH MODE: Overwrite entire table or specific partitions
+    # ==========================================================================
+    print(f"FULL REFRESH: Overwriting table {TARGET_TABLE}")
+
+    if not target_exists:
+        # First time - create table
+        print(f"Creating new table: {TARGET_TABLE}")
+        silver_events_schema.write \
+            .format("delta") \
+            .mode("overwrite") \
+            .partitionBy("date_est", "hour_est") \
+            .option("overwriteSchema", "true") \
+            .saveAsTable(TARGET_TABLE)
+    else:
+        # Table exists - overwrite with partition pruning for efficiency
+        # This replaces only the partitions that have data in the source
+        silver_events_schema.write \
+            .format("delta") \
+            .mode("overwrite") \
+            .partitionBy("date_est", "hour_est") \
+            .option("replaceWhere",
+                    f"date_est >= '{START_DATE}'" if START_DATE else "1=1") \
+            .option("overwriteSchema", "true") \
+            .saveAsTable(TARGET_TABLE)
+
+    print(f"FULL REFRESH completed with {silver_events_schema.count()} records")
+
 else:
-    # Incremental MERGE
-    print(f"Performing incremental MERGE into {TARGET_TABLE}")
-    
-    # Register temp view for merge
-    silver_events_schema.createOrReplaceTempView("silver_events_updates")
-    
-    # MERGE statement
-    merge_sql = f"""
-    MERGE INTO {TARGET_TABLE} target
-    USING silver_events_updates source
-    ON target.event_pk = source.event_pk
-    WHEN MATCHED THEN
-        UPDATE SET *
-    WHEN NOT MATCHED THEN
-        INSERT *
-    """
-    
-    spark.sql(merge_sql)
-    print(f"MERGE completed successfully")
+    # ==========================================================================
+    # INCREMENTAL MODE: MERGE new/updated records
+    # ==========================================================================
+    if not target_exists:
+        # First time - create table
+        print(f"Creating new table: {TARGET_TABLE}")
+        silver_events_schema.write \
+            .format("delta") \
+            .mode("overwrite") \
+            .partitionBy("date_est", "hour_est") \
+            .option("overwriteSchema", "true") \
+            .saveAsTable(TARGET_TABLE)
+        print(f"Table created successfully with {silver_events_schema.count()} records")
+    else:
+        # Incremental MERGE
+        print(f"INCREMENTAL: Performing MERGE into {TARGET_TABLE}")
+
+        # Register temp view for merge
+        silver_events_schema.createOrReplaceTempView("silver_events_updates")
+
+        # MERGE statement
+        merge_sql = f"""
+        MERGE INTO {TARGET_TABLE} target
+        USING silver_events_updates source
+        ON target.event_pk = source.event_pk
+        WHEN MATCHED THEN
+            UPDATE SET *
+        WHEN NOT MATCHED THEN
+            INSERT *
+        """
+
+        spark.sql(merge_sql)
+        print(f"INCREMENTAL MERGE completed successfully")
 
 # COMMAND ----------
 
@@ -800,27 +898,29 @@ else:
 max_timestamp = silver_events_schema.agg(F.max("event_timestamp")).collect()[0][0]
 max_date = silver_events_schema.agg(F.max("event_date_est")).collect()[0][0]
 
-# Update watermark table
-spark.sql(f"""
-    MERGE INTO {CHECKPOINT_TABLE} target
-    USING (
-        SELECT 
-            '{TARGET_TABLE}' as table_name,
-            CAST('{max_timestamp}' AS TIMESTAMP) as last_processed_timestamp,
-            CAST('{max_date}' AS DATE) as last_processed_date,
-            current_timestamp() as updated_at
-    ) source
-    ON target.table_name = source.table_name
-    WHEN MATCHED THEN
-        UPDATE SET 
-            last_processed_timestamp = source.last_processed_timestamp,
-            last_processed_date = source.last_processed_date,
-            updated_at = source.updated_at
-    WHEN NOT MATCHED THEN
-        INSERT *
-""")
-
-print(f"Watermark updated: {max_timestamp}")
+# Update watermark table (only for INCREMENTAL mode)
+if RUN_MODE == "INCREMENTAL":
+    spark.sql(f"""
+        MERGE INTO {CHECKPOINT_TABLE} target
+        USING (
+            SELECT
+                '{TARGET_TABLE}' as table_name,
+                CAST('{max_timestamp}' AS TIMESTAMP) as last_processed_timestamp,
+                CAST('{max_date}' AS DATE) as last_processed_date,
+                current_timestamp() as updated_at
+        ) source
+        ON target.table_name = source.table_name
+        WHEN MATCHED THEN
+            UPDATE SET
+                last_processed_timestamp = source.last_processed_timestamp,
+                last_processed_date = source.last_processed_date,
+                updated_at = source.updated_at
+        WHEN NOT MATCHED THEN
+            INSERT *
+    """)
+    print(f"Watermark updated: {max_timestamp}")
+else:
+    print(f"FULL REFRESH mode: Watermark not updated (max timestamp in batch: {max_timestamp})")
 
 # COMMAND ----------
 
@@ -890,9 +990,13 @@ unique_sessions = silver_events_schema.select("session_id").distinct().count()
 print("=" * 80)
 print("SILVER LAYER - CUSTOMER EVENTS ENRICHED - JOB COMPLETED")
 print("=" * 80)
+print(f"Run Mode: {RUN_MODE}")
 print(f"Source Table: {SOURCE_TABLE}")
 print(f"Target Table: {TARGET_TABLE}")
-print(f"Watermark: {last_watermark} -> {max_timestamp}")
+if RUN_MODE == "FULL_REFRESH":
+    print(f"Date Range: {START_DATE or 'default'} to {END_DATE or 'now'}")
+else:
+    print(f"Watermark: {last_watermark} -> {max_timestamp}")
 print(f"Total Events Processed: {total_processed:,}")
 print(f"Unique Customers: {unique_customers:,}")
 print(f"Unique Sessions: {unique_sessions:,}")
@@ -900,4 +1004,4 @@ print(f"Processing Timestamp: {datetime.now()}")
 print("=" * 80)
 
 # Return success
-dbutils.notebook.exit(f"Success: Processed {total_processed} events")
+dbutils.notebook.exit(f"Success: {RUN_MODE} - Processed {total_processed} events")
