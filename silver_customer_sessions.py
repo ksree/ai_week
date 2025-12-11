@@ -176,7 +176,7 @@ else:
 # MAGIC     MIN(event_timestamp_est) as session_start_timestamp_est,
 # MAGIC     MAX(event_timestamp_est) as session_end_timestamp_est,
 # MAGIC     CAST((UNIX_TIMESTAMP(MAX(event_timestamp_est)) - UNIX_TIMESTAMP(MIN(event_timestamp_est))) AS BIGINT) as session_duration_seconds,
-# MAGIC     HOUR(MIN(event_timestamp_est)) as session_hour_est,
+# MAGIC     CAST(HOUR(MIN(event_timestamp_est)) AS INT) as session_hour_est,
 # MAGIC     DATE_FORMAT(MIN(event_timestamp_est), 'EEEE') as day_of_week,
 # MAGIC     HOUR(MIN(event_timestamp_est)) BETWEEN 9 AND 16 as is_business_hours,
 # MAGIC     DAYOFWEEK(MIN(event_date_est)) IN (1, 7) as is_weekend,
@@ -227,7 +227,7 @@ else:
 # MAGIC     
 # MAGIC     -- Device & Geographic
 # MAGIC     MODE(device_type) as primary_device_type,
-# MAGIC     COUNT(DISTINCT device_type) - 1 as device_switches,
+# MAGIC     CAST(COUNT(DISTINCT device_type) - 1 AS INT) as device_switches,
 # MAGIC     MAX(country) as country,
 # MAGIC     MAX(state) as state,
 # MAGIC     MAX(city) as city,
