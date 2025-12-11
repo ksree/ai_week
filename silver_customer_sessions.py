@@ -210,7 +210,7 @@ else:
 # MAGIC     -- Conversion & Revenue
 # MAGIC     MAX(is_conversion_event) as has_conversion,
 # MAGIC     MAX(is_transaction_event) as has_transaction,
-# MAGIC     SUM(COALESCE(revenue, 0)) as total_session_revenue,
+# MAGIC     CAST(SUM(COALESCE(revenue, 0)) AS DECIMAL(19,4)) as total_session_revenue,
 # MAGIC     
 # MAGIC     -- Distinct conversion count using fact table logic
 # MAGIC     COUNT(DISTINCT CASE 
