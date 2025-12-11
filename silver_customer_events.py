@@ -89,8 +89,8 @@ spark.sql("USE SCHEMA test")
 # MAGIC USING (
 # MAGIC   SELECT 
 # MAGIC     'silver_customer_events_enriched' as table_name,
-# MAGIC     CAST('2025-12-08 00:00:00' AS TIMESTAMP) as last_processed_timestamp,
-# MAGIC     CAST('2025-12-08' AS DATE) as last_processed_date,
+# MAGIC     CAST('2025-01-01 00:00:00' AS TIMESTAMP) as last_processed_timestamp,
+# MAGIC     CAST('2025-01-01' AS DATE) as last_processed_date,
 # MAGIC     current_timestamp() as updated_at
 # MAGIC ) source
 # MAGIC ON target.table_name = source.table_name
