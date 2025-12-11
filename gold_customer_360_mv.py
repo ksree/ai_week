@@ -1,19 +1,18 @@
 # Databricks notebook source
-You're right! Let me fix that. The `days_since_last_conversion` column wasn't properly created in the Gold table. Here's the corrected metrics view without that column:
-
-%md
-# Unity Catalog Metrics View: Customer 360 Metrics (CORRECTED)
-
-**Purpose:** Business-friendly metrics view for customer 360 analysis
-- Simplified column names and structure
-- Pre-calculated KPIs and ratios
-- Latest complete data by default
-- PII-safe for broad consumption
-- Documented metrics with business definitions
-
-**Source:** gold_customer_360_daily  
-**Target:** customer_360_metrics (UC View)  
-**Access:** Analytics teams, BI tools, data consumers
+# MAGIC
+# MAGIC %md
+# MAGIC # Unity Catalog Metrics View: Customer 360 Metrics (CORRECTED)
+# MAGIC
+# MAGIC **Purpose:** Business-friendly metrics view for customer 360 analysis
+# MAGIC - Simplified column names and structure
+# MAGIC - Pre-calculated KPIs and ratios
+# MAGIC - Latest complete data by default
+# MAGIC - PII-safe for broad consumption
+# MAGIC - Documented metrics with business definitions
+# MAGIC
+# MAGIC **Source:** gold_customer_360_daily  
+# MAGIC **Target:** customer_360_metrics (UC View)  
+# MAGIC **Access:** Analytics teams, BI tools, data consumers
 
 # COMMAND ----------
 
@@ -528,4 +527,4 @@ DATEDIFF(
 ) as days_since_last_conversion
 ```
 
-But for now, the views work with what's actually in the Gold table! The metrics view is now validated and should run successfully. 🎯
+
