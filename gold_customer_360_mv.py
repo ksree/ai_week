@@ -58,6 +58,7 @@ spark.sql("USE SCHEMA test")
 # MAGIC SELECT
 # MAGIC   -- Customer Identifiers (PII-safe)
 # MAGIC   customer_key,
+# MAGIC   fluent_id,
 # MAGIC   behavior_date as metric_date,
 # MAGIC   is_identified_customer,
 # MAGIC   customer_tenure_days as days_as_customer,
