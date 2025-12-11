@@ -799,21 +799,25 @@ if RUN_MODE == "FULL_REFRESH":
 
     if START_DATE:
         # Overwrite only specific partitions based on date range
+        # Note: replaceWhere doesn't support overwriteSchema, so schema must match
+        # Use mergeSchema to handle minor schema differences
         df_to_write.write \
             .format("delta") \
             .mode("overwrite") \
             .option("replaceWhere", f"date_est >= '{START_DATE}'") \
-            .option("overwriteSchema", "true") \
+            .option("mergeSchema", "true") \
             .saveAsTable(TARGET_TABLE)
         print(f"Partitions replaced for dates >= {START_DATE}")
     else:
-        # Full table overwrite
+        # Full table overwrite - drop and recreate to force schema alignment
+        print("Dropping existing table for full schema refresh...")
+        spark.sql(f"DROP TABLE IF EXISTS {TARGET_TABLE}")
         df_to_write.write \
             .format("delta") \
             .mode("overwrite") \
-            .option("overwriteSchema", "true") \
+            .partitionBy("date_est", "hour_est") \
             .saveAsTable(TARGET_TABLE)
-        print("Full table overwritten")
+        print("Full table overwritten with new schema")
 
     record_count = df_to_write.count()
     print(f"FULL REFRESH completed with {record_count:,} records")
