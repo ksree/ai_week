@@ -333,14 +333,14 @@ def hash_phone(phone):
 # MAGIC     CAST(timestamp AS TIMESTAMP) as event_timestamp,
 # MAGIC     from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York') as event_timestamp_est,
 # MAGIC     CAST(from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York') AS DATE) as event_date_est,
-# MAGIC     HOUR(from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York')) as event_hour_est,
+# MAGIC     CAST(HOUR(from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York')) AS INT) as event_hour_est,
 # MAGIC     
 # MAGIC     -- Local hour (if timezone offset available)
-# MAGIC     CASE 
-# MAGIC       WHEN timestamp IS NOT NULL 
+# MAGIC     CAST(CASE
+# MAGIC       WHEN timestamp IS NOT NULL
 # MAGIC       THEN HOUR(CAST(timestamp AS TIMESTAMP) + MAKE_INTERVAL(0, 0, 0, 0, CAST(timestamp AS INT), 0, 0))
 # MAGIC       ELSE HOUR(from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York'))
-# MAGIC     END as local_hour_of_day,
+# MAGIC     END AS INT) as local_hour_of_day,
 # MAGIC     
 # MAGIC     -- Day of week
 # MAGIC     DATE_FORMAT(from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York'), 'EEEE') as day_of_week,
