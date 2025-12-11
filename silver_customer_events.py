@@ -447,15 +447,15 @@ def hash_phone(phone):
 # MAGIC   SELECT 
 # MAGIC     *,
 # MAGIC     -- Comprehensive data quality score (0-1)
-# MAGIC     (
+# MAGIC     CAST((
 # MAGIC       -- Critical fields (0.65 total)
 # MAGIC       CASE WHEN customer_key IS NOT NULL THEN 0.20 ELSE 0.0 END +
 # MAGIC       CASE WHEN event_timestamp IS NOT NULL THEN 0.20 ELSE 0.0 END +
 # MAGIC       CASE WHEN campaign_id IS NOT NULL THEN 0.15 ELSE 0.0 END +
 # MAGIC       CASE WHEN device_type IS NOT NULL THEN 0.10 ELSE 0.0 END +
-# MAGIC       
+# MAGIC
 # MAGIC       -- Identity quality bonus (0.15 total)
-# MAGIC       CASE 
+# MAGIC       CASE
 # MAGIC         WHEN customer_key_source = 'profile_id' THEN 0.15
 # MAGIC         WHEN customer_key_source = 'fluent_id' THEN 0.12
 # MAGIC         WHEN customer_key_source = 'email_sha256' THEN 0.10
@@ -463,13 +463,13 @@ def hash_phone(phone):
 # MAGIC         WHEN customer_key_source = 'phone_sha256' THEN 0.08
 # MAGIC         ELSE 0.0
 # MAGIC       END +
-# MAGIC       
+# MAGIC
 # MAGIC       -- Important supporting fields (0.20 total)
 # MAGIC       CASE WHEN advertiser_id IS NOT NULL THEN 0.05 ELSE 0.0 END +
 # MAGIC       CASE WHEN creative_id IS NOT NULL THEN 0.05 ELSE 0.0 END +
 # MAGIC       CASE WHEN country IS NOT NULL THEN 0.05 ELSE 0.0 END +
 # MAGIC       CASE WHEN browser_name IS NOT NULL THEN 0.05 ELSE 0.0 END
-# MAGIC     ) as data_quality_score
+# MAGIC     ) AS DOUBLE) as data_quality_score
 # MAGIC     
 # MAGIC   FROM flattened_data
 # MAGIC ),
