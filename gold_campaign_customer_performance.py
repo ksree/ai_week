@@ -151,8 +151,8 @@ spark.sql("USE SCHEMA test")
 # MAGIC     COUNT(DISTINCT creative_id) as unique_creative_count,
 # MAGIC
 # MAGIC     -- Time Metrics
-# MAGIC     MIN(event_timestamp_est) as first_interaction_time,
-# MAGIC     MAX(event_timestamp_est) as last_interaction_time,
+# MAGIC     MIN(event_timestamp) as first_interaction_time,
+# MAGIC     MAX(event_timestamp) as last_interaction_time,
 # MAGIC
 # MAGIC     -- Metadata
 # MAGIC     CURRENT_TIMESTAMP() as last_updated_timestamp
@@ -228,8 +228,8 @@ spark.sql("USE SCHEMA test")
 # MAGIC --   ROUND(COALESCE(SUM(revenue), 0) / NULLIF(SUM(CASE WHEN conversion_type_name = 'Transaction' THEN 1 ELSE 0 END), 0), 2) as avg_order_value,
 # MAGIC --   COUNT(DISTINCT session_id) as total_sessions,
 # MAGIC --   COUNT(DISTINCT creative_id) as unique_creative_count,
-# MAGIC --   MIN(event_timestamp_est) as first_interaction_time,
-# MAGIC --   MAX(event_timestamp_est) as last_interaction_time,
+# MAGIC --   MIN(event_timestamp) as first_interaction_time,
+# MAGIC --   MAX(event_timestamp) as last_interaction_time,
 # MAGIC --   CURRENT_TIMESTAMP() as last_updated_timestamp
 # MAGIC -- FROM silver_customer_events_enriched
 # MAGIC -- WHERE campaign_id IS NOT NULL AND customer_key IS NOT NULL
