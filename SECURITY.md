@@ -7,12 +7,12 @@
 If you are the repository owner, you must **immediately rotate all exposed credentials**:
 
 1. **Anthropic API Key** (`ANTHROPIC_API_KEY`)
-   - Revoke the exposed key: `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`
+   - Revoke the exposed key (check git history for the compromised value)
    - Generate a new key from your Anthropic console
    - Update environment variables with the new key
 
 2. **Databricks Token** (`DATABRICKS_TOKEN`)
-   - Revoke the exposed token: `dapi7171b9fabcf8594ade141fbf6c1f116d`
+   - Revoke the exposed token (check git history for the compromised value)
    - Generate a new token from your Databricks workspace
    - Update environment variables with the new token
 
