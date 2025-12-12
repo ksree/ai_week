@@ -7,7 +7,7 @@ import anthropic
 
 # ---------- Claude: generate code ----------
 client = anthropic.Anthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY", "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")
+    api_key=os.environ["ANTHROPIC_API_KEY"]
 )
 
 message = client.messages.create(
@@ -186,7 +186,7 @@ print(generated_code)
 
 # ---------- Databricks: save as notebook ----------
 DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST", "https://dbc-99e67a7d-d06a.cloud.databricks.com")
-DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN", "dapi7171b9fabcf8594ade141fbf6c1f116d")
+DATABRICKS_TOKEN = os.environ["DATABRICKS_TOKEN"]
 
 # Where in the workspace you want the notebook
 workspace_path = "/Users/ksreedharan@fluentco.com/ai_week/gold_customer_360_mv.py"
