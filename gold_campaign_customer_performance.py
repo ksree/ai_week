@@ -108,10 +108,10 @@ spark.sql("USE SCHEMA test")
 # MAGIC     FIRST_VALUE(campaign_name, TRUE) as campaign_name,
 # MAGIC     FIRST_VALUE(advertiser_id, TRUE) as advertiser_id,
 # MAGIC     FIRST_VALUE(advertiser_name, TRUE) as advertiser_name,
-# MAGIC     FIRST_VALUE(vertical, TRUE) as vertical,
+# MAGIC     FIRST_VALUE(campaign_vertical, TRUE) as vertical,
 # MAGIC
 # MAGIC     -- Customer Info
-# MAGIC     MAX(is_identified_customer) as is_identified_customer,
+# MAGIC     MAX(is_identified_user) as is_identified_customer,
 # MAGIC     FIRST_VALUE(fluent_id, TRUE) as fluent_id,
 # MAGIC
 # MAGIC     -- Engagement Metrics
@@ -122,7 +122,7 @@ spark.sql("USE SCHEMA test")
 # MAGIC       SUM(CASE WHEN event_type IN ('click', 'offer-click') THEN 1 ELSE 0 END) * 100.0 /
 # MAGIC       NULLIF(COUNT(*), 0), 2
 # MAGIC     ) as click_through_rate,
-# MAGIC     SUM(CASE WHEN slot_position = 1 THEN 1 ELSE 0 END) as total_p1_views,
+# MAGIC     SUM(CASE WHEN is_p1_view THEN 1 ELSE 0 END) as total_p1_views,
 # MAGIC
 # MAGIC     -- Conversion Metrics
 # MAGIC     SUM(CASE
@@ -140,9 +140,9 @@ spark.sql("USE SCHEMA test")
 # MAGIC
 # MAGIC     -- Revenue Metrics
 # MAGIC     COALESCE(SUM(revenue), 0) as total_revenue,
-# MAGIC     COALESCE(SUM(transaction_value), 0) as total_transaction_value,
+# MAGIC     COALESCE(SUM(revenue), 0) as total_transaction_value,
 # MAGIC     ROUND(
-# MAGIC       COALESCE(SUM(transaction_value), 0) /
+# MAGIC       COALESCE(SUM(revenue), 0) /
 # MAGIC       NULLIF(SUM(CASE WHEN conversion_type_name = 'Transaction' THEN 1 ELSE 0 END), 0), 2
 # MAGIC     ) as avg_order_value,
 # MAGIC
@@ -212,20 +212,20 @@ spark.sql("USE SCHEMA test")
 # MAGIC --   FIRST_VALUE(campaign_name, TRUE) as campaign_name,
 # MAGIC --   FIRST_VALUE(advertiser_id, TRUE) as advertiser_id,
 # MAGIC --   FIRST_VALUE(advertiser_name, TRUE) as advertiser_name,
-# MAGIC --   FIRST_VALUE(vertical, TRUE) as vertical,
-# MAGIC --   MAX(is_identified_customer) as is_identified_customer,
+# MAGIC --   FIRST_VALUE(campaign_vertical, TRUE) as vertical,
+# MAGIC --   MAX(is_identified_user) as is_identified_customer,
 # MAGIC --   FIRST_VALUE(fluent_id, TRUE) as fluent_id,
 # MAGIC --   COUNT(*) as total_impressions,
 # MAGIC --   SUM(CASE WHEN event_type IN ('view', 'offer-view') THEN 1 ELSE 0 END) as total_views,
 # MAGIC --   SUM(CASE WHEN event_type IN ('click', 'offer-click') THEN 1 ELSE 0 END) as total_clicks,
 # MAGIC --   ROUND(SUM(CASE WHEN event_type IN ('click', 'offer-click') THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2) as click_through_rate,
-# MAGIC --   SUM(CASE WHEN slot_position = 1 THEN 1 ELSE 0 END) as total_p1_views,
+# MAGIC --   SUM(CASE WHEN is_p1_view THEN 1 ELSE 0 END) as total_p1_views,
 # MAGIC --   SUM(CASE WHEN source_reference = 'offer-convert' AND conversion_type_name != 'Click' THEN 1 ELSE 0 END) as total_conversions,
 # MAGIC --   ROUND(SUM(CASE WHEN source_reference = 'offer-convert' AND conversion_type_name != 'Click' THEN 1 ELSE 0 END) * 100.0 / NULLIF(SUM(CASE WHEN event_type IN ('click', 'offer-click') THEN 1 ELSE 0 END), 0), 2) as conversion_rate,
 # MAGIC --   SUM(CASE WHEN conversion_type_name = 'Transaction' THEN 1 ELSE 0 END) as total_transactions,
 # MAGIC --   COALESCE(SUM(revenue), 0) as total_revenue,
-# MAGIC --   COALESCE(SUM(transaction_value), 0) as total_transaction_value,
-# MAGIC --   ROUND(COALESCE(SUM(transaction_value), 0) / NULLIF(SUM(CASE WHEN conversion_type_name = 'Transaction' THEN 1 ELSE 0 END), 0), 2) as avg_order_value,
+# MAGIC --   COALESCE(SUM(revenue), 0) as total_transaction_value,
+# MAGIC --   ROUND(COALESCE(SUM(revenue), 0) / NULLIF(SUM(CASE WHEN conversion_type_name = 'Transaction' THEN 1 ELSE 0 END), 0), 2) as avg_order_value,
 # MAGIC --   COUNT(DISTINCT session_id) as total_sessions,
 # MAGIC --   COUNT(DISTINCT creative_id) as unique_creative_count,
 # MAGIC --   MIN(event_timestamp_est) as first_interaction_time,
