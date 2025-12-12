@@ -101,9 +101,8 @@ spark.sql("USE SCHEMA test")
 # Determine date range based on RUN_MODE
 if RUN_MODE == "FULL_REFRESH":
     # Full refresh mode - use provided date range or defaults
-    # Note: We subtract 1 day from START_DATE when filtering source data (createDate is UTC)
-    # to account for timezone conversion (UTC -> EST can shift dates by up to 5 hours)
-    # The actual date_est filtering happens at write time to ensure correct partitions
+    # Note: Using timestamp field (event time) for filtering
+    # We expand the range by ±1 day to handle UTC->EST timezone conversion
     if START_DATE:
         # Subtract 1 day to capture UTC events that become EST dates on START_DATE
         start_ts = f"CAST('{START_DATE} 00:00:00' AS TIMESTAMP) - INTERVAL 1 DAY"
@@ -125,7 +124,7 @@ if RUN_MODE == "FULL_REFRESH":
             {end_ts} as end_watermark_ts
     """)
     print(f"FULL REFRESH MODE: Processing data from {START_DATE or 'last 365 days'} to {END_DATE or 'now'}")
-    print(f"  (Source filter expanded by ±1 day to handle UTC->EST timezone conversion)")
+    print(f"  (Using timestamp field, expanded by ±1 day for UTC->EST conversion)")
 
 else:
     # Incremental mode - use watermark table
@@ -160,12 +159,14 @@ else:
 # MAGIC
 # MAGIC WITH source_filtered AS (
 # MAGIC   -- Filter source data based on run mode (incremental or full refresh with date range)
+# MAGIC   -- Filter uses UTC timestamp for performance (partition pruning)
+# MAGIC   -- EST conversion applied in downstream CTEs for all derived fields
 # MAGIC   SELECT *
 # MAGIC   FROM centraldata_prod.minion_event.offer_silver_clean
-# MAGIC   WHERE createDate >= (SELECT watermark_ts FROM last_watermark)
+# MAGIC   WHERE CAST(timestamp AS TIMESTAMP) >= (SELECT watermark_ts FROM last_watermark)
 # MAGIC     AND (
 # MAGIC       (SELECT end_watermark_ts FROM last_watermark) IS NULL  -- Incremental: no end date
-# MAGIC       OR createDate <= (SELECT end_watermark_ts FROM last_watermark)  -- Full refresh: apply end date
+# MAGIC       OR CAST(timestamp AS TIMESTAMP) <= (SELECT end_watermark_ts FROM last_watermark)  -- Full refresh: apply end date
 # MAGIC     )
 # MAGIC     AND sourceReferenceId IS NOT NULL  -- Required for primary key
 # MAGIC ),
