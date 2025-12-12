@@ -200,7 +200,7 @@ def hash_phone(phone):
 # MAGIC       (SELECT end_watermark_ts FROM last_watermark) IS NULL  -- Incremental: no end date
 # MAGIC       OR createDate <= (SELECT end_watermark_ts FROM last_watermark)  -- Full refresh: apply end date
 # MAGIC     )
-# MAGIC     AND _corrupt_record IS NULL
+# MAGIC     AND sourceReferenceId IS NOT NULL  -- Required for primary key
 # MAGIC ),
 # MAGIC
 # MAGIC identity_resolved AS (
@@ -312,9 +312,9 @@ def hash_phone(phone):
 # MAGIC flattened_data AS (
 # MAGIC   -- Step 3: Flatten all nested structures
 # MAGIC   SELECT
-# MAGIC     -- Generate unique event primary key
-# MAGIC     SHA2(CONCAT(offerTraceId, '_', CAST(timestamp AS STRING)), 256) as event_pk,
-# MAGIC     
+# MAGIC     -- Primary key: sourceReferenceId is unique per event
+# MAGIC     sourceReferenceId as event_pk,
+# MAGIC
 # MAGIC     -- Primary identifiers
 # MAGIC     offerTraceId as offer_trace_id,
 # MAGIC     sessionId as session_id,
@@ -435,9 +435,6 @@ def hash_phone(phone):
 # MAGIC     profile.attrs.ownCar as profile_owns_car,
 # MAGIC     CAST(profile.firstVisit AS TIMESTAMP) as profile_first_visit,
 # MAGIC     CAST(profile.lastVisit AS TIMESTAMP) as profile_last_visit,
-# MAGIC     
-# MAGIC     -- Data quality
-# MAGIC     _corrupt_record IS NOT NULL as has_corrupt_record,
 # MAGIC     
 # MAGIC     -- Metadata
 # MAGIC     INPUT_FILE_NAME() as source_file,
@@ -614,7 +611,6 @@ def hash_phone(phone):
 # MAGIC   profile_last_visit,
 # MAGIC   
 # MAGIC   -- Data quality
-# MAGIC   has_corrupt_record,
 # MAGIC   is_duplicate,
 # MAGIC   data_quality_score,
 # MAGIC   
@@ -778,7 +774,6 @@ df_final.createOrReplaceTempView("silver_customer_events_final")
 # MAGIC   profile_owns_car STRING,
 # MAGIC   profile_first_visit TIMESTAMP,
 # MAGIC   profile_last_visit TIMESTAMP,
-# MAGIC   has_corrupt_record BOOLEAN,
 # MAGIC   is_duplicate BOOLEAN,
 # MAGIC   data_quality_score DOUBLE,
 # MAGIC   source_file STRING,
