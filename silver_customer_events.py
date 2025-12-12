@@ -142,43 +142,10 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Enhanced Identity Resolution with UDF for Phone Normalization
-
-# COMMAND ----------
-
-from pyspark.sql import functions as F
-from pyspark.sql.types import StringType
-import hashlib
-
-# UDF for phone number normalization
-@F.udf(StringType())
-def normalize_phone(phone):
-    """Normalize phone number by removing non-digits and handling US format"""
-    if phone:
-        # Remove all non-digit characters
-        digits_only = ''.join(c for c in str(phone) if c.isdigit())
-        # Remove leading 1 for US numbers if present and length is 11
-        if len(digits_only) == 11 and digits_only.startswith('1'):
-            return digits_only[1:]
-        return digits_only if len(digits_only) >= 10 else None
-    return None
-
-# UDF for generating phone hash
-@F.udf(StringType())
-def hash_phone(phone):
-    """Generate SHA256 hash of normalized phone"""
-    if phone:
-        normalized = ''.join(c for c in str(phone) if c.isdigit())
-        if len(normalized) == 11 and normalized.startswith('1'):
-            normalized = normalized[1:]
-        if len(normalized) >= 10:
-            return hashlib.sha256(normalized.encode()).hexdigest()
-    return None
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 5. Main Transformation - SQL-Based with Conversion Logic
+# MAGIC ## 4. Main Transformation - SQL-Based with Conversion Logic
+# MAGIC
+# MAGIC Customer key logic matches source offer_silver_clean definition:
+# MAGIC `emailsha256 → emailmd5 → email → phone → telephone`
 
 # COMMAND ----------
 
@@ -205,47 +172,52 @@ def hash_phone(phone):
 # MAGIC
 # MAGIC identity_resolved AS (
 # MAGIC   -- Step 1: Extract and resolve customer identity
-# MAGIC   SELECT 
+# MAGIC   -- IMPORTANT: Customer key logic matches source offer_silver_clean definition:
+# MAGIC   -- Priority: emailsha256 → emailmd5 → email → phone → telephone
+# MAGIC   SELECT
 # MAGIC     *,
 # MAGIC     -- Extract identity fields from nested structures
 # MAGIC     profile.id as profile_id_raw,
 # MAGIC     fluentId as fluent_id_raw,
-# MAGIC     profile.emailSha256 as email_sha256_raw,
-# MAGIC     profile.emailMd5 as email_md5_raw,
-# MAGIC     profile.telephone as phone_raw,
-# MAGIC     
-# MAGIC     -- Determine customer_key with priority hierarchy
+# MAGIC     data.emailSha256 as email_sha256,
+# MAGIC     data.emailMd5 as email_md5,
+# MAGIC     data.email as email_raw,
+# MAGIC     data.phone as phone_raw,
+# MAGIC     data.telephone as telephone_raw,
+# MAGIC
+# MAGIC     -- Determine customer_key with priority hierarchy (matching source definition)
+# MAGIC     -- Source logic: emailsha256 → emailmd5 → email → phone → telephone
 # MAGIC     COALESCE(
-# MAGIC       profile.id,           -- Priority 1: Profile ID (most reliable)
-# MAGIC       fluentId,             -- Priority 2: Fluent ID
-# MAGIC       profile.emailSha256,          -- Priority 3: Email SHA256
-# MAGIC       profile.emailMd5,             -- Priority 4: Email MD5
-# MAGIC       -- Note: phone_sha256 would be priority 5, handled in Python UDF
+# MAGIC       data.emailSha256,     -- Priority 1: Email SHA256
+# MAGIC       data.emailMd5,        -- Priority 2: Email MD5
+# MAGIC       data.email,           -- Priority 3: Email
+# MAGIC       data.phone,           -- Priority 4: Phone
+# MAGIC       data.telephone,       -- Priority 5: Telephone
 # MAGIC       CONCAT('ANON_', sessionId)  -- Fallback: Anonymous session
 # MAGIC     ) as customer_key_preliminary,
-# MAGIC     
+# MAGIC
 # MAGIC     -- Identify source of customer_key
-# MAGIC     CASE 
-# MAGIC       WHEN profile.id IS NOT NULL THEN 'profile_id'
-# MAGIC       WHEN fluentId IS NOT NULL THEN 'fluent_id'
-# MAGIC       WHEN profile.emailSha256 IS NOT NULL THEN 'email_sha256'
-# MAGIC       WHEN profile.emailMd5 IS NOT NULL THEN 'email_md5'
-# MAGIC       -- phone_sha256 check in Python layer
+# MAGIC     CASE
+# MAGIC       WHEN data.emailSha256 IS NOT NULL THEN 'email_sha256'
+# MAGIC       WHEN data.emailMd5 IS NOT NULL THEN 'email_md5'
+# MAGIC       WHEN data.email IS NOT NULL THEN 'email'
+# MAGIC       WHEN data.phone IS NOT NULL THEN 'phone'
+# MAGIC       WHEN data.telephone IS NOT NULL THEN 'telephone'
 # MAGIC       ELSE 'session_id'
 # MAGIC     END as customer_key_source_preliminary,
-# MAGIC     
+# MAGIC
 # MAGIC     -- Identity presence flags
 # MAGIC     profile.id IS NOT NULL as has_profile_id,
-# MAGIC     (profile.emailSha256 IS NOT NULL OR profile.emailMd5 IS NOT NULL) as has_email_identifier,
-# MAGIC     profile.telephone IS NOT NULL as has_phone_raw,
-# MAGIC     
-# MAGIC     -- Determine if user is identified
-# MAGIC     (profile.id IS NOT NULL 
-# MAGIC      OR fluentId IS NOT NULL 
-# MAGIC      OR profile.emailSha256 IS NOT NULL 
-# MAGIC      OR profile.emailMd5 IS NOT NULL
-# MAGIC      OR profile.telephone IS NOT NULL) as is_identified_user_preliminary
-# MAGIC       
+# MAGIC     (data.emailSha256 IS NOT NULL OR data.emailMd5 IS NOT NULL OR data.email IS NOT NULL) as has_email_identifier,
+# MAGIC     (data.phone IS NOT NULL OR data.telephone IS NOT NULL) as has_phone_identifier,
+# MAGIC
+# MAGIC     -- Determine if user is identified (any PII present)
+# MAGIC     (data.emailSha256 IS NOT NULL
+# MAGIC      OR data.emailMd5 IS NOT NULL
+# MAGIC      OR data.email IS NOT NULL
+# MAGIC      OR data.phone IS NOT NULL
+# MAGIC      OR data.telephone IS NOT NULL) as is_identified_user_preliminary
+# MAGIC
 # MAGIC   FROM source_filtered
 # MAGIC ),
 # MAGIC
@@ -321,19 +293,21 @@ def hash_phone(phone):
 # MAGIC     sourceReferenceId as source_reference_id,
 # MAGIC     sourceReference as source_reference,
 # MAGIC     
-# MAGIC     -- Customer identity (preliminary - will be updated with phone in next step)
+# MAGIC     -- Customer identity (matching source offer_silver_clean definition)
 # MAGIC     customer_key_preliminary as customer_key,
 # MAGIC     customer_key_source_preliminary as customer_key_source,
 # MAGIC     profile_id_raw as profile_id,
 # MAGIC     fluent_id_raw as fluent_id,
-# MAGIC     email_sha256_raw as email_sha256,
-# MAGIC     email_md5_raw as email_md5,
-# MAGIC     phone_raw,  -- Will be normalized and hashed in Python
+# MAGIC     email_sha256,
+# MAGIC     email_md5,
+# MAGIC     email_raw as email,
+# MAGIC     phone_raw as phone,
+# MAGIC     telephone_raw as telephone,
 # MAGIC     is_identified_user_preliminary as is_identified_user,
 # MAGIC     NOT is_identified_user_preliminary as is_anonymous_user,
 # MAGIC     has_profile_id,
 # MAGIC     has_email_identifier,
-# MAGIC     has_phone_raw,
+# MAGIC     has_phone_identifier,
 # MAGIC     
 # MAGIC     -- Timestamps and temporal attributes
 # MAGIC     CAST(timestamp AS TIMESTAMP) as event_timestamp,
@@ -514,19 +488,21 @@ def hash_phone(phone):
 # MAGIC   source_reference_id,
 # MAGIC   source_reference,
 # MAGIC   
-# MAGIC   -- User identity (will be updated with phone hash in next cell)
+# MAGIC   -- User identity (matching source offer_silver_clean definition)
 # MAGIC   customer_key,
 # MAGIC   customer_key_source,
 # MAGIC   profile_id,
 # MAGIC   fluent_id,
 # MAGIC   email_sha256,
 # MAGIC   email_md5,
-# MAGIC   phone_raw,  -- Temporary, will be replaced with normalized/hashed versions
+# MAGIC   email,
+# MAGIC   phone,
+# MAGIC   telephone,
 # MAGIC   is_identified_user,
 # MAGIC   is_anonymous_user,
 # MAGIC   has_profile_id,
 # MAGIC   has_email_identifier,
-# MAGIC   has_phone_raw,
+# MAGIC   has_phone_identifier,
 # MAGIC   
 # MAGIC   -- Timestamps
 # MAGIC   event_timestamp,
@@ -632,54 +608,16 @@ def hash_phone(phone):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Apply Phone Normalization and Hash (Python UDFs)
+# MAGIC ## 6. Register Final View for Write
+# MAGIC
+# MAGIC Customer key is now fully resolved in SQL using source logic:
+# MAGIC `emailsha256 → emailmd5 → email → phone → telephone`
 
 # COMMAND ----------
 
-from pyspark.sql import functions as F
-
-# Read the SQL transformation
-df_transformed = spark.table("silver_customer_events_transformed")
-
-# Apply phone normalization and hashing
-df_with_phone = df_transformed \
-    .withColumn("phone_normalized_value", normalize_phone(F.col("phone_raw"))) \
-    .withColumn("phone_sha256_hash", hash_phone(F.col("phone_raw"))) \
-    .withColumn("has_phone_identifier", F.col("phone_normalized_value").isNotNull())
-
-# Update customer_key and customer_key_source if phone is only available identifier
-df_final = df_with_phone \
-    .withColumn(
-        "customer_key",
-        F.when(
-            (F.col("customer_key_source") == "session_id") & F.col("phone_sha256_hash").isNotNull(),
-            F.col("phone_sha256_hash")
-        ).otherwise(F.col("customer_key"))
-    ) \
-    .withColumn(
-        "customer_key_source",
-        F.when(
-            (F.col("customer_key_source") == "session_id") & F.col("phone_sha256_hash").isNotNull(),
-            "phone_sha256"
-        ).otherwise(F.col("customer_key_source"))
-    ) \
-    .withColumn(
-        "is_identified_user",
-        F.when(
-            F.col("phone_sha256_hash").isNotNull(),
-            True
-        ).otherwise(F.col("is_identified_user"))
-    ) \
-    .withColumn(
-        "is_anonymous_user",
-        F.when(
-            F.col("phone_sha256_hash").isNotNull(),
-            False
-        ).otherwise(F.col("is_anonymous_user"))
-    ) \
-    .drop("phone_raw")  # Drop raw phone for PII compliance
-
-# Register as temp view for next steps
+# Read the SQL transformation and register as final view
+# No additional Python transformations needed - identity resolution done in SQL
+df_final = spark.table("silver_customer_events_transformed")
 df_final.createOrReplaceTempView("silver_customer_events_final")
 
 # COMMAND ----------
@@ -703,8 +641,9 @@ df_final.createOrReplaceTempView("silver_customer_events_final")
 # MAGIC   fluent_id STRING,
 # MAGIC   email_sha256 STRING,
 # MAGIC   email_md5 STRING,
-# MAGIC   phone_sha256_hash STRING,
-# MAGIC   phone_normalized_value STRING,
+# MAGIC   email STRING,
+# MAGIC   phone STRING,
+# MAGIC   telephone STRING,
 # MAGIC   is_identified_user BOOLEAN,
 # MAGIC   is_anonymous_user BOOLEAN,
 # MAGIC   has_profile_id BOOLEAN,
