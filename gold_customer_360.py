@@ -1234,13 +1234,16 @@ if RUN_MODE == "FULL_REFRESH":
             replace_condition = f"date_est >= CAST('{START_DATE}' AS DATE)"
             print(f"Filtering data for dates >= {START_DATE}")
 
+        # Drop and recreate table to avoid schema merge issues
+        print("Dropping existing table for schema refresh...")
+        spark.sql(f"DROP TABLE IF EXISTS {TARGET_TABLE}")
+
         df_filtered.write \
             .format("delta") \
             .mode("overwrite") \
-            .option("replaceWhere", replace_condition) \
-            .option("mergeSchema", "true") \
+            .partitionBy("date_est") \
             .saveAsTable(TARGET_TABLE)
-        print(f"Partitions replaced for: {replace_condition}")
+        print(f"Table recreated with data for: {replace_condition}")
         record_count = df_filtered.count()
     else:
         # Full table overwrite
