@@ -316,12 +316,8 @@ else:
 # MAGIC     CAST(from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York') AS DATE) as event_date_est,
 # MAGIC     CAST(HOUR(from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York')) AS INT) as event_hour_est,
 # MAGIC     
-# MAGIC     -- Local hour (if timezone offset available)
-# MAGIC     CAST(CASE
-# MAGIC       WHEN timestamp IS NOT NULL
-# MAGIC       THEN HOUR(CAST(timestamp AS TIMESTAMP) + MAKE_INTERVAL(0, 0, 0, 0, CAST(timestamp AS INT), 0, 0))
-# MAGIC       ELSE HOUR(from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York'))
-# MAGIC     END AS INT) as local_hour_of_day,
+# MAGIC     -- Local hour of day (EST timezone)
+# MAGIC     CAST(HOUR(from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York')) AS INT) as local_hour_of_day,
 # MAGIC     
 # MAGIC     -- Day of week
 # MAGIC     DATE_FORMAT(from_utc_timestamp(CAST(timestamp AS TIMESTAMP), 'America/New_York'), 'EEEE') as day_of_week,
@@ -433,12 +429,14 @@ else:
 # MAGIC       CASE WHEN device_type IS NOT NULL THEN 0.10 ELSE 0.0 END +
 # MAGIC
 # MAGIC       -- Identity quality bonus (0.15 total)
+# MAGIC       -- Priority: email_sha256 > email_md5 > email > phone > telephone > session_id
 # MAGIC       CASE
-# MAGIC         WHEN customer_key_source = 'profile_id' THEN 0.15
-# MAGIC         WHEN customer_key_source = 'fluent_id' THEN 0.12
-# MAGIC         WHEN customer_key_source = 'email_sha256' THEN 0.10
-# MAGIC         WHEN customer_key_source = 'email_md5' THEN 0.08
-# MAGIC         WHEN customer_key_source = 'phone_sha256' THEN 0.08
+# MAGIC         WHEN customer_key_source = 'email_sha256' THEN 0.15
+# MAGIC         WHEN customer_key_source = 'email_md5' THEN 0.12
+# MAGIC         WHEN customer_key_source = 'email' THEN 0.10
+# MAGIC         WHEN customer_key_source = 'phone' THEN 0.08
+# MAGIC         WHEN customer_key_source = 'telephone' THEN 0.08
+# MAGIC         WHEN customer_key_source = 'session_id' THEN 0.0
 # MAGIC         ELSE 0.0
 # MAGIC       END +
 # MAGIC
@@ -848,12 +846,12 @@ else:
 # MAGIC   COUNT(DISTINCT customer_key) as unique_customers,
 # MAGIC   COUNT(DISTINCT session_id) as unique_sessions,
 # MAGIC   
-# MAGIC   -- Identity resolution breakdown
-# MAGIC   SUM(CASE WHEN customer_key_source = 'profile_id' THEN 1 ELSE 0 END) as profile_id_events,
-# MAGIC   SUM(CASE WHEN customer_key_source = 'fluent_id' THEN 1 ELSE 0 END) as fluent_id_events,
+# MAGIC   -- Identity resolution breakdown (matches customer_key priority: email_sha256 > email_md5 > email > phone > telephone)
 # MAGIC   SUM(CASE WHEN customer_key_source = 'email_sha256' THEN 1 ELSE 0 END) as email_sha256_events,
 # MAGIC   SUM(CASE WHEN customer_key_source = 'email_md5' THEN 1 ELSE 0 END) as email_md5_events,
-# MAGIC   SUM(CASE WHEN customer_key_source = 'phone_sha256' THEN 1 ELSE 0 END) as phone_events,
+# MAGIC   SUM(CASE WHEN customer_key_source = 'email' THEN 1 ELSE 0 END) as email_events,
+# MAGIC   SUM(CASE WHEN customer_key_source = 'phone' THEN 1 ELSE 0 END) as phone_events,
+# MAGIC   SUM(CASE WHEN customer_key_source = 'telephone' THEN 1 ELSE 0 END) as telephone_events,
 # MAGIC   SUM(CASE WHEN customer_key_source = 'session_id' THEN 1 ELSE 0 END) as anonymous_events,
 # MAGIC   
 # MAGIC   -- User identification rates
