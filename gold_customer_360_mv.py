@@ -132,7 +132,12 @@ spark.sql("USE SCHEMA test")
 # MAGIC   primary_source_id as primary_source,
 # MAGIC   unique_partners_used as partners_used,
 # MAGIC   unique_sources_used as sources_used,
-# MAGIC   
+# MAGIC
+# MAGIC   -- Campaign & Advertiser Interactions (last 30 days)
+# MAGIC   campaigns_interacted_30d as campaigns_list,
+# MAGIC   advertisers_interacted_30d as advertisers_list,
+# MAGIC   verticals_preferred_30d as verticals_list,
+# MAGIC
 # MAGIC   -- Segmentation
 # MAGIC   customer_value_segment as value_segment,
 # MAGIC   engagement_segment,
@@ -396,6 +401,154 @@ spark.sql("USE SCHEMA test")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 5b. Create Repeat Customer Analysis View
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Repeat Customer Analysis View
+# MAGIC -- Calculates visit frequency and repeat customer metrics from gold_customer_360_daily
+# MAGIC
+# MAGIC CREATE OR REPLACE VIEW repeat_customer_analysis
+# MAGIC COMMENT 'Repeat customer identification with visit frequency metrics - shows how many times customers visited the network'
+# MAGIC AS
+# MAGIC WITH customer_visits AS (
+# MAGIC   SELECT
+# MAGIC     customer_key,
+# MAGIC     is_identified_customer,
+# MAGIC     MAX(customer_value_segment) as customer_value_segment,
+# MAGIC     MAX(lifecycle_stage) as lifecycle_stage,
+# MAGIC     MAX(profile_geo_country) as country,
+# MAGIC     MAX(profile_geo_state) as state,
+# MAGIC
+# MAGIC     -- Visit metrics (each behavior_date = 1 visit day)
+# MAGIC     COUNT(DISTINCT behavior_date) as total_unique_visit_days,
+# MAGIC     SUM(total_sessions) as lifetime_sessions,
+# MAGIC     SUM(total_events) as lifetime_events,
+# MAGIC     SUM(total_conversions) as lifetime_conversions,
+# MAGIC
+# MAGIC     -- Date range
+# MAGIC     MIN(behavior_date) as first_visit_date,
+# MAGIC     MAX(behavior_date) as last_visit_date,
+# MAGIC     DATEDIFF(MAX(behavior_date), MIN(behavior_date)) as customer_lifespan_days,
+# MAGIC     DATEDIFF(CURRENT_DATE, MAX(behavior_date)) as days_since_last_visit,
+# MAGIC
+# MAGIC     -- Average days between visits
+# MAGIC     CASE
+# MAGIC       WHEN COUNT(DISTINCT behavior_date) > 1
+# MAGIC       THEN ROUND(DATEDIFF(MAX(behavior_date), MIN(behavior_date)) / (COUNT(DISTINCT behavior_date) - 1.0), 1)
+# MAGIC       ELSE NULL
+# MAGIC     END as avg_days_between_visits,
+# MAGIC
+# MAGIC     -- Revenue metrics (take max since these are cumulative in gold table)
+# MAGIC     MAX(lifetime_revenue) as lifetime_revenue,
+# MAGIC     MAX(lifetime_transaction_count) as lifetime_transactions
+# MAGIC
+# MAGIC   FROM gold_customer_360_daily
+# MAGIC   WHERE is_identified_customer = TRUE
+# MAGIC     AND data_quality_score >= 0.5
+# MAGIC   GROUP BY customer_key, is_identified_customer
+# MAGIC )
+# MAGIC
+# MAGIC SELECT
+# MAGIC   customer_key,
+# MAGIC   customer_value_segment,
+# MAGIC   lifecycle_stage,
+# MAGIC   country,
+# MAGIC   state,
+# MAGIC
+# MAGIC   -- Visit metrics
+# MAGIC   total_unique_visit_days,
+# MAGIC   lifetime_sessions,
+# MAGIC   lifetime_events,
+# MAGIC   lifetime_conversions,
+# MAGIC   ROUND(lifetime_sessions * 1.0 / NULLIF(total_unique_visit_days, 0), 2) as avg_sessions_per_visit_day,
+# MAGIC
+# MAGIC   -- Timing
+# MAGIC   first_visit_date,
+# MAGIC   last_visit_date,
+# MAGIC   customer_lifespan_days,
+# MAGIC   days_since_last_visit,
+# MAGIC   avg_days_between_visits,
+# MAGIC
+# MAGIC   -- Repeat customer flags
+# MAGIC   CASE WHEN total_unique_visit_days > 1 THEN TRUE ELSE FALSE END as is_repeat_customer,
+# MAGIC   CASE WHEN total_unique_visit_days >= 5 THEN TRUE ELSE FALSE END as is_frequent_visitor,
+# MAGIC
+# MAGIC   -- Revenue
+# MAGIC   lifetime_revenue,
+# MAGIC   lifetime_transactions,
+# MAGIC   ROUND(lifetime_revenue / NULLIF(total_unique_visit_days, 0), 2) as avg_revenue_per_visit_day,
+# MAGIC
+# MAGIC   -- Frequency segment
+# MAGIC   CASE
+# MAGIC     WHEN total_unique_visit_days >= 20 THEN 'power_user'
+# MAGIC     WHEN total_unique_visit_days >= 10 THEN 'highly_regular'
+# MAGIC     WHEN total_unique_visit_days >= 5 THEN 'regular'
+# MAGIC     WHEN total_unique_visit_days >= 2 THEN 'occasional'
+# MAGIC     ELSE 'one_time'
+# MAGIC   END as visit_frequency_segment,
+# MAGIC
+# MAGIC   -- Recency tier
+# MAGIC   CASE
+# MAGIC     WHEN days_since_last_visit <= 7 THEN 'active'
+# MAGIC     WHEN days_since_last_visit <= 30 THEN 'recent'
+# MAGIC     WHEN days_since_last_visit <= 90 THEN 'lapsed'
+# MAGIC     ELSE 'dormant'
+# MAGIC   END as recency_tier
+# MAGIC
+# MAGIC FROM customer_visits
+# MAGIC ORDER BY total_unique_visit_days DESC, lifetime_revenue DESC;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Repeat Customer Summary View
+# MAGIC -- Aggregated statistics for repeat vs one-time customers
+# MAGIC
+# MAGIC CREATE OR REPLACE VIEW repeat_customer_summary
+# MAGIC COMMENT 'Summary statistics comparing repeat vs one-time customers'
+# MAGIC AS
+# MAGIC SELECT
+# MAGIC   visit_frequency_segment,
+# MAGIC   recency_tier,
+# MAGIC
+# MAGIC   COUNT(*) as customer_count,
+# MAGIC
+# MAGIC   -- Visit metrics
+# MAGIC   ROUND(AVG(total_unique_visit_days), 1) as avg_visit_days,
+# MAGIC   ROUND(AVG(lifetime_sessions), 1) as avg_lifetime_sessions,
+# MAGIC   ROUND(AVG(avg_days_between_visits), 1) as avg_days_between_visits,
+# MAGIC
+# MAGIC   -- Revenue metrics
+# MAGIC   ROUND(SUM(lifetime_revenue), 2) as total_revenue,
+# MAGIC   ROUND(AVG(lifetime_revenue), 2) as avg_revenue_per_customer,
+# MAGIC   SUM(lifetime_conversions) as total_conversions,
+# MAGIC
+# MAGIC   -- Percentages
+# MAGIC   ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as pct_of_customers,
+# MAGIC   ROUND(SUM(lifetime_revenue) * 100.0 / NULLIF(SUM(SUM(lifetime_revenue)) OVER (), 0), 2) as pct_of_revenue
+# MAGIC
+# MAGIC FROM repeat_customer_analysis
+# MAGIC GROUP BY visit_frequency_segment, recency_tier
+# MAGIC ORDER BY
+# MAGIC   CASE visit_frequency_segment
+# MAGIC     WHEN 'power_user' THEN 1
+# MAGIC     WHEN 'highly_regular' THEN 2
+# MAGIC     WHEN 'regular' THEN 3
+# MAGIC     WHEN 'occasional' THEN 4
+# MAGIC     ELSE 5
+# MAGIC   END,
+# MAGIC   CASE recency_tier
+# MAGIC     WHEN 'active' THEN 1
+# MAGIC     WHEN 'recent' THEN 2
+# MAGIC     WHEN 'lapsed' THEN 3
+# MAGIC     ELSE 4
+# MAGIC   END;
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 6. Add Column-Level Comments for Documentation
 
 # COMMAND ----------
@@ -482,6 +635,8 @@ print("  4. customer_current_state (Operational)")
 print("  5. at_risk_customers (Retention)")
 print("  6. high_value_customers (VIP)")
 print("  7. new_customer_cohort (Activation)")
+print("  8. repeat_customer_analysis (Repeat Customer Metrics)")
+print("  9. repeat_customer_summary (Repeat vs One-Time Summary)")
 print("\nColumns Removed (not in source):")
 print("  ✗ unique_creatives_seen")
 print("  ✗ days_since_last_conversion")
