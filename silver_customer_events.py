@@ -462,20 +462,14 @@ else:
 # MAGIC ),
 # MAGIC
 # MAGIC final_filtered AS (
-# MAGIC   -- Step 6: Apply final filters
-# MAGIC   SELECT 
+# MAGIC   -- Step 6: Apply final filters (only dedup and valid date range)
+# MAGIC   SELECT
 # MAGIC     *,
 # MAGIC     row_num > 1 as is_duplicate
 # MAGIC   FROM deduped
-# MAGIC   WHERE row_num = 1  -- Keep only first occurrence
-# MAGIC     AND is_bot = FALSE  -- Remove bot traffic
-# MAGIC     AND data_quality_score >= 0.5  -- Minimum quality threshold
+# MAGIC   WHERE row_num = 1  -- Keep only first occurrence (dedup by sourceReferenceId)
 # MAGIC     AND event_timestamp >= '2020-01-01'  -- Valid date range
 # MAGIC     AND event_timestamp <= CURRENT_TIMESTAMP()  -- No future dates
-# MAGIC     AND NOT (
-# MAGIC       LOWER(COALESCE(campaign_name, '')) LIKE '%test%'  -- Remove test campaigns
-# MAGIC       OR LOWER(COALESCE(advertiser_name, '')) LIKE '%test%'
-# MAGIC     )
 # MAGIC )
 # MAGIC
 # MAGIC -- Final SELECT with partitioning columns
